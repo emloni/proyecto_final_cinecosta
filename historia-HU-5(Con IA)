@@ -1,0 +1,239 @@
+import csv
+import numpy as np
+
+class Sala:
+    def __init__(self, nombre, tamano, precio_base):
+        self.nombre = nombre
+        self.tamano = tamano.upper()
+        self.precio_base = float(precio_base)
+        
+        # [HU-01] Dimensiones estrictas por tipo de sala (Páginas 1 y 2)
+        if self.tamano == 'A':
+            self.filas, self.sillas_por_fila = 8, 10
+        elif self.tamano == 'B':
+            self.filas, self.sillas_por_fila = 10, 12
+        elif self.tamano == 'C':
+            self.filas, self.sillas_por_fila = 12, 14
+        else:
+            raise ValueError(f"Tamaño de sala '{tamano}' inválido.")
+            
+        # [HU-02] Inicializar el mapa de ocupación mensual con ceros usando NumPy
+        self.mapa_ocupacion = np.zeros((self.filas, self.sillas_por_fila), dtype=int)
+        self.mapa_ingresos = np.zeros((self.filas, self.sillas_por_fila), dtype=float)
+        self.mapa_zonas = self._generar_mapa_zonas()
+        self.ocupacion_construida = False
+        self.ingresos_construidos = False
+
+    def _generar_mapa_zonas(self):
+        zonas = np.full((self.filas, self.sillas_por_fila), 'I', dtype='<U1')
+        premium_filas = range(self.filas // 3, self.filas - self.filas // 3)
+        premium_columnas = range(self.sillas_por_fila // 3, self.sillas_por_fila - self.sillas_por_fila // 3)
+
+        for fila in range(self.filas):
+            for columna in range(self.sillas_por_fila):
+                if fila == self.filas - 1:
+                    zonas[fila, columna] = 'U'
+                elif fila in premium_filas and columna in premium_columnas:
+                    zonas[fila, columna] = 'P'
+                elif fila < self.filas // 3:
+                    zonas[fila, columna] = 'E'
+                else:
+                    zonas[fila, columna] = 'I'
+
+        return zonas
+
+    def precios_por_asiento(self, factores_zona):
+        precios = np.zeros((self.filas, self.sillas_por_fila), dtype=float)
+        for zona, factor in factores_zona.items():
+            precios[self.mapa_zonas == zona] = self.precio_base * float(factor)
+        return precios
+
+class Teatro:
+    def __init__(self, nombre, city):
+        self.nombre = nombre
+        self.city = city
+        self.salas = {} # Agrupa las salas de este teatro
+
+class Empresa:
+    def __init__(self, nombre):
+        self.nombre = nombre
+        self.teatros = {} # Jerarquía superior: Agrupa los teatros
+        self.factores_zona = {
+            'E': 0.8,  # Económica
+            'I': 1.0,  # Intermedia
+            'P': 1.5,  # Premium
+            'U': 0.7,  # Última fila
+        }
+
+    def construir_mapa_ingresos_sala(self, teatro_nom, ciudad, sala_nom):
+        id_teatro = f"{teatro_nom}-{ciudad}"
+        if id_teatro not in self.teatros or sala_nom not in self.teatros[id_teatro].salas:
+            print(f"Error: La sala '{sala_nom}' no está en la infraestructura.")
+            return
+
+        sala = self.teatros[id_teatro].salas[sala_nom]
+        if not sala.ocupacion_construida:
+            print(f"Error: No se ha construido el mapa de ocupación para '{sala_nom}'.")
+            return
+
+        precios = sala.precios_por_asiento(self.factores_zona)
+        sala.mapa_ingresos = sala.mapa_ocupacion.astype(float) * precios
+        sala.ingresos_construidos = True
+
+        print(f">> Mapa de ingresos mensual generado para {sala_nom}.")
+
+    def analizar_zonas_sala(self, teatro_nom, ciudad, sala_nom):
+        id_teatro = f"{teatro_nom}-{ciudad}"
+        if id_teatro not in self.teatros or sala_nom not in self.teatros[id_teatro].salas:
+            print(f"Error: La sala '{sala_nom}' no está en la infraestructura.")
+            return
+
+        sala = self.teatros[id_teatro].salas[sala_nom]
+        if not sala.ocupacion_construida or not sala.ingresos_construidos:
+            print(f"Error: Debe tener mapas de ocupación e ingresos construidos para '{sala_nom}'.")
+            return
+
+        zonas = {
+            'E': 'Económica',
+            'P': 'Premium',
+            'I': 'Intermedia',
+            'U': 'Última fila',
+        }
+
+        resultados = {}
+        for codigo, nombre in zonas.items():
+            mascara = sala.mapa_zonas == codigo
+            asientos_zona = int(np.sum(mascara))
+            ocupacion_total = int(np.sum(sala.mapa_ocupacion[mascara]))
+            ingresos_totales = float(np.sum(sala.mapa_ingresos[mascara]))
+
+            if asientos_zona == 0:
+                ocupacion_promedio = 0.0
+                ingresos_promedio = 0.0
+            else:
+                ocupacion_promedio = ocupacion_total / asientos_zona
+                ingresos_promedio = ingresos_totales / asientos_zona
+
+            resultados[codigo] = {
+                'zona': nombre,
+                'asientos': asientos_zona,
+                'ocupacion_total': ocupacion_total,
+                'ocupacion_promedio': round(ocupacion_promedio, 2),
+                'ingresos_totales': round(ingresos_totales, 2),
+                'ingresos_promedio': round(ingresos_promedio, 2),
+            }
+
+        for codigo in ['E', 'P', 'I', 'U']:
+            fila = resultados[codigo]
+            print(f"Zona {fila['zona']}: Ocupación total={fila['ocupacion_total']} | "+
+                  f"Promedio/silla={fila['ocupacion_promedio']:.2f} | "+
+                  f"Ingresos totales={fila['ingresos_totales']:.2f} | "+
+                  f"Ingresos promedio/silla={fila['ingresos_promedio']:.2f}")
+
+        return resultados
+
+    # =========================================================================
+    # HU-01: CARGAR INFRAESTRUCTURA DE LA EMPRESA
+    # =========================================================================
+    def cargar_infraestructura_csv(self, ruta_archivo):
+        try:
+            with open(ruta_archivo, mode='r', encoding='utf-8') as archivo:
+                lector = csv.reader(archivo)
+                next(lector) # Saltar fila de encabezados
+                
+                for num_fila, fila in enumerate(lector, start=2):
+                    try:
+                        teatro_nom = fila[0].strip()
+                        ciudad = fila[1].strip()
+                        sala_nom = fila[2].strip()
+                        tamano = fila[3].strip().upper()
+                        precio_base = float(fila[4])
+                        
+                        if tamano not in ['A', 'B', 'C']:
+                            raise ValueError(f"Tamaño '{tamano}' inválido.")
+                        if precio_base <= 0:
+                            raise ValueError("El precio base debe ser mayor a cero.")
+                            
+                        id_teatro = f"{teatro_nom}-{ciudad}"
+                        if id_teatro not in self.teatros:
+                            self.teatros[id_teatro] = Teatro(teatro_nom, ciudad)
+                            
+                        self.teatros[id_teatro].salas[sala_nom] = Sala(sala_nom, tamano, precio_base)
+                    except (ValueError, IndexError) as e:
+                        print(f"Registro inválido en Fila {num_fila}: {e}")
+            print(f"Estructura de la empresa '{self.nombre}' cargada.")
+        except FileNotFoundError:
+            print(f"El archivo '{ruta_archivo}' no existe.")
+
+    # =========================================================================
+    # HU-02: CONSTRUIR MAPA DE OCUPACIÓN MENSUAL¿
+    # =========================================================================
+    def cargar_ocupacion_mensual_csv(self, ruta_archivo, teatro_nom, ciudad, sala_nom):
+        id_teatro = f"{teatro_nom}-{ciudad}"
+        
+        # Criterio de Aceptación 2: Validar si la sala existe previamente en la empresa
+        if id_teatro not in self.teatros or sala_nom not in self.teatros[id_teatro].salas:
+            print(f"Error: La sala '{sala_nom}' no está en la infraestructura.")
+            return
+            
+        sala = self.teatros[id_teatro].salas[sala_nom]
+        
+        try:
+            with open(ruta_archivo, mode='r', encoding='utf-8') as archivo:
+                lector = csv.reader(archivo)
+                next(lector) # Saltar fila de encabezados
+                
+                for num_fila, fila in enumerate(lector, start=2):
+                    try:
+                        # Mapeo posicional de las 9 columnas del archivo de entradas
+                        csv_teatro = fila[0].strip()
+                        csv_sala = fila[1].strip()
+                        # Nota: Las columnas 2, 3, 4, 7 y 8 corresponden a fecha, consecutivo, hora, edad y sexo.
+                        # No modifican la matriz directamente, pero se leen de forma implícita.
+                        
+                        # Filtramos únicamente los registros asociados a este teatro y sala específicos
+                        if csv_teatro == teatro_nom and csv_sala == sala_nom:
+                            # Ajuste de índices: De base 1 (CSV) a base 0 (Matriz NumPy)
+                            f_idx = int(fila[5]) - 1
+                            s_idx = int(fila[6]) - 1
+                            
+                            # Criterio de Aceptación 5: Validar que esté dentro de las dimensiones de la sala
+                            if 0 <= f_idx < sala.filas and 0 <= s_idx < sala.sillas_por_fila:
+                                sala.mapa_ocupacion[f_idx, s_idx] += 1
+                            else:
+                                print(f"Fila {num_fila}: Asiento [Fila {f_idx+1}, Silla {s_idx+1}] fuera de rango.")
+                    except (ValueError, IndexError) as e:
+                        print(f"Registro corrupto o incompleto en Fila {num_fila}: {e}")
+            sala.ocupacion_construida = True
+            print(f">> Mapa de ocupación mensual generado para {sala_nom}.")
+        except FileNotFoundError:
+            print(f"El archivo '{ruta_archivo}' no existe.")
+
+    # =========================================================================
+    # HU-03: CALCULAR ESTADÍSTICOS DESCRIPTIVOS
+    # =========================================================================
+    def calcular_estadisticas_sala(self, teatro_nom, ciudad, sala_nom):
+        id_teatro = f"{teatro_nom}-{ciudad}"
+        if id_teatro not in self.teatros or sala_nom not in self.teatros[id_teatro].salas:
+            print("Sala no encontrada.")
+            return
+
+        sala = self.teatros[id_teatro].salas[sala_nom]
+        mapa = sala.mapa_ocupacion # Matriz NumPy
+        
+        # Cálculos directos usando NumPy (Criterios 2, 3, 4 y 5)
+        promedio = np.mean(mapa)
+        desviacion = np.std(mapa)
+        max_ocupacion = np.max(mapa)
+        min_ocupacion = np.min(mapa)
+        
+        # Criterio de Aceptación 6: Desempate por primera ocurrencia secuencial usando argwhere
+        pos_max = np.argwhere(mapa == max_ocupacion)[0] + 1
+        pos_min = np.argwhere(mapa == min_ocupacion)[0] + 1
+
+        print(f"\n================ METRICAS DE OPERACIÓN: {sala_nom} ================")
+        print(f"Ocupación Promedio por Silla: {promedio:.2f}")
+        print(f"Desviación Estándar:           {desviacion:.2f}")
+        print(f"Ocupación Máxima:              {max_ocupacion} en (Fila {pos_max[0]}, Silla {pos_max[1]})")
+        print(f"Ocupación Mínima:              {min_ocupacion} en (Fila {pos_min[0]}, Silla {pos_min[1]})")
+        print("===============================================================")
