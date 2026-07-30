@@ -1,0 +1,23 @@
+nombre_teatro,ciudad,nombre_sala,tamaño_sala,precio_base
+Teatro Centro,Barranquilla,Sala 1,A,12000
+Teatro Centro,Barranquilla,Sala 2,B,15000
+Teatro Centro,Barranquilla,Sala 3,C,20000
+Teatro Norte,Santa Marta,Sala Unica,C,18000
+Teatro Norte,Santa Marta,Sala VIP,A,25000
+Teatro Prado,Medellin,Sala Azul,B,14500
+Teatro Prado,Medellin,Sala Roja,A,11000
+Teatro Centro,Barranquilla,Sala Premium,A,22000
+Teatro Centro,Barranquilla,Sala Familiar,B,14000
+Teatro Norte,Santa Marta,Sala 2,B,16000
+Teatro Norte,Santa Marta,Sala 3,C,17000
+Teatro Prado,Medellin,Sala Verde,B,15000
+Teatro Prado,Medellin,Sala Oro,A,21000
+Teatro Caribe,Cartagena,Sala Mar,A,23000
+Teatro Caribe,Cartagena,Sala Coral,B,17000
+Teatro Pacifico,Cali,Sala Principal,A,20000
+Teatro Pacifico,Cali,Sala Alterna,C,13000
+Teatro Capital,Bogota,Sala Andina,A,26000
+Teatro Capital,Bogota,Sala Central,B,19000
+Teatro Sur,Pereira,Sala Café,B,15500
+Teatro Sur,Pereira,Sala Montaña,C,12500
+Teatro Oriente,Bucaramanga,Sala Santander,A,21500
