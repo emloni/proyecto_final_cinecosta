@@ -1,0 +1,411 @@
+import csv
+import os
+import numpy as np
+
+
+class Sala:
+
+    ZONAS = {'E': 'económica', 'P': 'premium', 'I': 'intermedia', 'U': 'última fila'}
+
+    def __init__(self, nombre, tamano, precio_base):
+        self.nombre = nombre
+        self.tamano = tamano.upper()
+        self.precio_base = float(precio_base)
+
+        if self.precio_base <= 0:
+            raise ValueError(f"El precio base debe ser mayor que cero (sala '{self.nombre}').")
+
+        if self.tamano == 'A':
+            self.filas, self.sillas_por_fila = 8, 10
+        elif self.tamano == 'B':
+            self.filas, self.sillas_por_fila = 10, 12
+        elif self.tamano == 'C':
+            self.filas, self.sillas_por_fila = 12, 14
+        else:
+            raise ValueError(f"Tamaño de sala '{tamano}' inválido. Debe ser A, B o C.")
+
+        self.mapa_ocupacion = np.zeros((self.filas, self.sillas_por_fila), dtype=int)
+        self.mapa_ingresos = np.zeros((self.filas, self.sillas_por_fila), dtype=float)
+        self.mapa_zonas = self._generar_mapa_zonas()
+        self.ocupacion_construida = False
+        self.ingresos_construidos = False
+
+        self.matriz_ocupacion_dia = None
+        self.funciones_dia = None
+        self.fecha_dia = None
+
+        self.matriz_ocupacion_mensual_dias = None
+        self.dias_mes = None
+
+        self.matriz_demanda_sexo = None
+        self.dias_demanda_sexo = None
+        self.zonas_demanda_sexo = None
+        self.sexos_demanda_sexo = None
+
+    def _generar_mapa_zonas(self):
+        """
+        Asigna la zona de cada silla según el ESQUEMA por fila completa
+        definido en el enunciado (no depende de la columna):
+
+          A (8 filas):  E=1-3   P=4-5   I=6-7    U=8
+          B (10 filas): E=1-4   P=5-6   I=7-9    U=10
+          C (12 filas): E=1-5   P=6-7   I=8-11   U=12
+        """
+        rangos_por_tamano = {
+            'A': {'E': (0, 3), 'P': (3, 5), 'I': (5, 7), 'U': (7, 8)},
+            'B': {'E': (0, 4), 'P': (4, 6), 'I': (6, 9), 'U': (9, 10)},
+            'C': {'E': (0, 5), 'P': (5, 7), 'I': (7, 11), 'U': (11, 12)},
+        }
+        rangos = rangos_por_tamano[self.tamano]
+
+        zonas = np.empty((self.filas, self.sillas_por_fila), dtype='<U1')
+        for zona, (inicio, fin) in rangos.items():
+            zonas[inicio:fin, :] = zona
+        return zonas
+
+    def _indices_validos(self, fila, silla):
+        fila_idx = fila - 1
+        silla_idx = silla - 1
+        if 0 <= fila_idx < self.filas and 0 <= silla_idx < self.sillas_por_fila:
+            return fila_idx, silla_idx
+        return None
+
+    def cargar_ocupacion(self, ruta_csv):
+        if not os.path.exists(ruta_csv):
+            raise FileNotFoundError(
+                f"No se encontró el archivo de entradas vendidas en la ruta: {ruta_csv}"
+            )
+
+        registros_invalidos = []
+
+        with open(ruta_csv, newline='', encoding='utf-8') as archivo:
+            lector = csv.reader(archivo)
+            for numero_linea, fila_csv in enumerate(lector, start=1):
+                if not fila_csv:
+                    continue
+                try:
+                    sala_registro = fila_csv[1].strip()
+                    fila = int(fila_csv[5])
+                    silla = int(fila_csv[6])
+                except (IndexError, ValueError):
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                if sala_registro != self.nombre:
+                    continue
+
+                indices = self._indices_validos(fila, silla)
+                if indices is None:
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                fila_idx, silla_idx = indices
+                self.mapa_ocupacion[fila_idx, silla_idx] += 1
+
+        if registros_invalidos:
+            print(f"Se encontraron {len(registros_invalidos)} registro(s) inválidos "
+                  f"en '{ruta_csv}' (fila o silla fuera de rango):")
+            for numero_linea, fila_csv in registros_invalidos:
+                print(f"  Línea {numero_linea}: {fila_csv}")
+
+        self.ocupacion_construida = True
+        return self.mapa_ocupacion
+
+    def estadisticos_ocupacion(self):
+        if not self.ocupacion_construida:
+            raise ValueError("El mapa de ocupación mensual debe construirse antes de calcular estadísticos.")
+
+        mapa = self.mapa_ocupacion
+        promedio = round(float(np.mean(mapa)), 2)
+        desviacion = round(float(np.std(mapa)), 2)
+
+        idx_max = np.unravel_index(np.argmax(mapa), mapa.shape)
+        idx_min = np.unravel_index(np.argmin(mapa), mapa.shape)
+
+        return {
+            'promedio': promedio,
+            'desviacion_estandar': desviacion,
+            'maximo': int(mapa[idx_max]),
+            'silla_maxima': (int(idx_max[0]) + 1, int(idx_max[1]) + 1),  
+            'minimo': int(mapa[idx_min]),
+            'silla_minima': (int(idx_min[0]) + 1, int(idx_min[1]) + 1),
+        }
+
+    def precios_por_asiento(self, factores_zona):
+        precios = np.zeros((self.filas, self.sillas_por_fila), dtype=float)
+        for zona, factor in factores_zona.items():
+            precios[self.mapa_zonas == zona] = self.precio_base * float(factor)
+        return precios
+
+    def construir_mapa_ingresos(self, factores_zona):
+        if not self.ocupacion_construida:
+            raise ValueError("El mapa de ocupación mensual debe construirse antes de calcular los ingresos.")
+
+        precios = self.precios_por_asiento(factores_zona)
+        if precios.shape != self.mapa_ocupacion.shape:
+            raise ValueError("Las dimensiones del mapa de ingresos deben coincidir exactamente con las del mapa de ocupación.")
+
+        self.mapa_ingresos = self.mapa_ocupacion.astype(float) * precios
+        self.ingresos_construidos = True
+        return self.mapa_ingresos
+
+    def analisis_por_zona(self):
+        if not self.ocupacion_construida:
+            raise ValueError("El mapa de ocupación mensual debe construirse antes de hacer el análisis por zona.")
+        if not self.ingresos_construidos:
+            raise ValueError("El mapa de ingresos mensual debe construirse antes de hacer el análisis por zona.")
+
+        resultado = {}
+        for zona, nombre_zona in self.ZONAS.items():
+            mascara = self.mapa_zonas == zona
+            num_sillas = int(np.sum(mascara))
+
+            ocupacion_total = int(np.sum(self.mapa_ocupacion[mascara]))
+            ingresos_totales = float(np.sum(self.mapa_ingresos[mascara]))
+
+            ocupacion_promedio = round(ocupacion_total / num_sillas, 2) if num_sillas > 0 else 0.0
+            ingresos_promedio = round(ingresos_totales / num_sillas, 2) if num_sillas > 0 else 0.0
+
+            resultado[nombre_zona] = {
+                'ocupacion_total': ocupacion_total,
+                'ocupacion_promedio_silla': ocupacion_promedio,
+                'ingresos_totales': round(ingresos_totales, 2),
+                'ingresos_promedio_silla': ingresos_promedio,
+            }
+
+        return resultado
+
+    def cargar_ocupacion_diaria(self, ruta_csv, fecha):
+        if not os.path.exists(ruta_csv):
+            raise FileNotFoundError(
+                f"No se encontró el archivo de entradas vendidas en la ruta: {ruta_csv}"
+            )
+
+        registros_invalidos = []
+        registros_dia = [] 
+
+        with open(ruta_csv, newline='', encoding='utf-8') as archivo:
+            lector = csv.reader(archivo)
+            for numero_linea, fila_csv in enumerate(lector, start=1):
+                if not fila_csv:
+                    continue
+                try:
+                    sala_registro = fila_csv[1].strip()
+                    fecha_registro = fila_csv[2].strip()
+                    numero_funcion = fila_csv[3].strip()
+                    fila = int(fila_csv[5])
+                    silla = int(fila_csv[6])
+                except (IndexError, ValueError):
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                if sala_registro != self.nombre or fecha_registro != fecha:
+                    continue
+
+                indices = self._indices_validos(fila, silla)
+                if indices is None:
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                fila_idx, silla_idx = indices
+                registros_dia.append((fila_idx, silla_idx, numero_funcion))
+
+        if registros_invalidos:
+            print(f"Se encontraron {len(registros_invalidos)} registro(s) inválidos "
+                  f"en '{ruta_csv}' (fila o silla fuera de rango):")
+            for numero_linea, fila_csv in registros_invalidos:
+                print(f"  Línea {numero_linea}: {fila_csv}")
+
+        if not registros_dia:
+            raise ValueError(
+                f"No se encontraron registros de entradas vendidas para la sala '{self.nombre}' "
+                f"en la fecha '{fecha}'."
+            )
+
+        funciones = sorted(
+            {numero_funcion for _, _, numero_funcion in registros_dia},
+            key=lambda f: int(f) if f.isdigit() else f
+        )
+        indice_funcion = {f: i for i, f in enumerate(funciones)}
+
+        matriz = np.zeros((self.filas, self.sillas_por_fila, len(funciones)), dtype=int)
+        for fila_idx, silla_idx, numero_funcion in registros_dia:
+            matriz[fila_idx, silla_idx, indice_funcion[numero_funcion]] = 1
+
+        self.matriz_ocupacion_dia = matriz
+        self.funciones_dia = funciones
+        self.fecha_dia = fecha
+
+        total_por_funcion = matriz.sum(axis=(0, 1))
+        total_por_silla_dia = matriz.sum(axis=2)
+
+        total_por_zona = {
+            self.ZONAS[zona]: int(np.sum(total_por_silla_dia[self.mapa_zonas == zona]))
+            for zona in self.ZONAS
+        }
+
+        return {
+            'total_por_funcion': {funciones[i]: int(total_por_funcion[i]) for i in range(len(funciones))},
+            'total_por_silla_dia': total_por_silla_dia,
+            'total_por_zona': total_por_zona,
+        }
+
+    def cargar_ocupacion_mensual_por_dia(self, ruta_csv):
+        if not os.path.exists(ruta_csv):
+            raise FileNotFoundError(
+                f"No se encontró el archivo de entradas vendidas en la ruta: {ruta_csv}"
+            )
+
+        registros_invalidos = []
+        conteos_por_dia = {}
+        fechas = set()
+
+        with open(ruta_csv, newline='', encoding='utf-8') as archivo:
+            lector = csv.reader(archivo)
+            for numero_linea, fila_csv in enumerate(lector, start=1):
+                if not fila_csv:
+                    continue
+                try:
+                    sala_registro = fila_csv[1].strip()
+                    fecha_registro = fila_csv[2].strip()
+                    fila = int(fila_csv[5])
+                    silla = int(fila_csv[6])
+                except (IndexError, ValueError):
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                if sala_registro != self.nombre:
+                    continue
+
+                indices = self._indices_validos(fila, silla)
+                if indices is None:
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                fila_idx, silla_idx = indices
+                fechas.add(fecha_registro)
+                if fecha_registro not in conteos_por_dia:
+                    conteos_por_dia[fecha_registro] = np.zeros((self.filas, self.sillas_por_fila), dtype=int)
+                conteos_por_dia[fecha_registro][fila_idx, silla_idx] += 1
+
+        if registros_invalidos:
+            print(f"Se encontraron {len(registros_invalidos)} registro(s) inválidos "
+                  f"en '{ruta_csv}' (fila o silla fuera de rango):")
+            for numero_linea, fila_csv in registros_invalidos:
+                print(f"  Línea {numero_linea}: {fila_csv}")
+
+        if not fechas:
+            raise ValueError(
+                f"No se encontraron registros de entradas vendidas para la sala '{self.nombre}' en el mes."
+            )
+
+        dias = sorted(fechas)
+        matriz = np.zeros((len(dias), self.filas, self.sillas_por_fila), dtype=int)
+        for i, dia in enumerate(dias):
+            matriz[i] = conteos_por_dia[dia]
+
+        self.matriz_ocupacion_mensual_dias = matriz
+        self.dias_mes = dias
+
+        ocupacion_total_por_dia = matriz.sum(axis=(1, 2))
+        ocupacion_promedio_por_dia = np.round(matriz.mean(axis=(1, 2)), 2)
+
+        idx_max = int(np.argmax(ocupacion_total_por_dia))
+        idx_min = int(np.argmin(ocupacion_total_por_dia))
+
+        return {
+            'dias': dias,
+            'ocupacion_total_por_dia': {dias[i]: int(ocupacion_total_por_dia[i]) for i in range(len(dias))},
+            'ocupacion_promedio_por_dia': {dias[i]: float(ocupacion_promedio_por_dia[i]) for i in range(len(dias))},
+            'dia_mayor_ocupacion': (dias[idx_max], int(ocupacion_total_por_dia[idx_max])),
+            'dia_menor_ocupacion': (dias[idx_min], int(ocupacion_total_por_dia[idx_min])),
+        }
+
+    def construir_matriz_demanda_sexo(self, ruta_csv):
+        if not os.path.exists(ruta_csv):
+            raise FileNotFoundError(
+                f"No se encontró el archivo de entradas vendidas en la ruta: {ruta_csv}"
+            )
+
+        registros_invalidos = []
+        registros_validos = []  
+        fechas = set()
+        sexos = set()
+
+        with open(ruta_csv, newline='', encoding='utf-8') as archivo:
+            lector = csv.reader(archivo)
+            for numero_linea, fila_csv in enumerate(lector, start=1):
+                if not fila_csv:
+                    continue
+                try:
+                    sala_registro = fila_csv[1].strip()
+                    fecha_registro = fila_csv[2].strip()
+                    fila = int(fila_csv[5])
+                    silla = int(fila_csv[6])
+                    sexo = fila_csv[8].strip()
+                except (IndexError, ValueError):
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                if sala_registro != self.nombre:
+                    continue
+
+                indices = self._indices_validos(fila, silla)
+                if indices is None:
+                    registros_invalidos.append((numero_linea, fila_csv))
+                    continue
+
+                fila_idx, silla_idx = indices
+                zona = str(self.mapa_zonas[fila_idx, silla_idx])
+
+                registros_validos.append((fecha_registro, zona, sexo))
+                fechas.add(fecha_registro)
+                sexos.add(sexo)
+
+        if registros_invalidos:
+            print(f"Se encontraron {len(registros_invalidos)} registro(s) inválidos "
+                  f"en '{ruta_csv}' (fila o silla fuera de rango):")
+            for numero_linea, fila_csv in registros_invalidos:
+                print(f"  Línea {numero_linea}: {fila_csv}")
+
+        if not fechas:
+            raise ValueError(
+                f"No se encontraron registros de entradas vendidas para la sala '{self.nombre}' en el mes."
+            )
+
+        dias = sorted(fechas)
+        zonas = list(self.ZONAS.keys())  
+        sexos_ordenados = sorted(sexos)
+
+        idx_dia = {d: i for i, d in enumerate(dias)}
+        idx_zona = {z: i for i, z in enumerate(zonas)}
+        idx_sexo = {s: i for i, s in enumerate(sexos_ordenados)}
+
+        matriz = np.zeros((len(dias), len(zonas), len(sexos_ordenados)), dtype=int)
+        for fecha_registro, zona, sexo in registros_validos:
+            matriz[idx_dia[fecha_registro], idx_zona[zona], idx_sexo[sexo]] += 1
+
+        self.matriz_demanda_sexo = matriz
+        self.dias_demanda_sexo = dias
+        self.zonas_demanda_sexo = zonas
+        self.sexos_demanda_sexo = sexos_ordenados
+
+        return matriz
+
+    def demanda_por_dia(self, fecha):
+        if self.matriz_demanda_sexo is None:
+            raise ValueError("La matriz de demanda por sexo debe construirse antes de consultarla.")
+        idx = self.dias_demanda_sexo.index(fecha)
+        return self.matriz_demanda_sexo[idx]
+
+    def demanda_por_zona(self, zona):
+        if self.matriz_demanda_sexo is None:
+            raise ValueError("La matriz de demanda por sexo debe construirse antes de consultarla.")
+        idx = self.zonas_demanda_sexo.index(zona)
+        return self.matriz_demanda_sexo[:, idx, :]
+
+    def demanda_por_sexo(self, sexo):
+        if self.matriz_demanda_sexo is None:
+            raise ValueError("La matriz de demanda por sexo debe construirse antes de consultarla.")
+        idx = self.sexos_demanda_sexo.index(sexo)
+        return self.matriz_demanda_sexo[:, :, idx]
