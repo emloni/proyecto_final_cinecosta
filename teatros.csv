@@ -1,8 +1,0 @@
-nombre_teatro,ciudad,nombre_sala,tamaño_sala,precio_base
-Teatro Centro,Barranquilla,Sala 1,A,12000
-Teatro Centro,Barranquilla,Sala 2,B,15000
-Teatro Centro,Barranquilla,Sala 3,C,20000
-Teatro Norte,Santa Marta,Sala Unica,C,18000
-Teatro Norte,Santa Marta,Sala VIP,A,25000
-Teatro Prado,Medellin,Sala Azul,B,14500
-Teatro Prado,Medellin,Sala Roja,A,11000
